@@ -1,0 +1,152 @@
+---
+title: "Descriptif des bases BMO historicées"
+author: "Thomas Vroylandt"
+date: "15/05/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      message = FALSE,
+                      warning = FALSE)
+```
+
+Ce document décrit les trois tables de données historiques BMO présentes dans SISP. Si on veut importer les versions R locales, on peut privilégier `read_csv2()`. Les temps de chargement ne sont pas optimaux mais restent corrects (aux alentours de 2/3 min maximum par fichier, quand ils sont stockés en local).
+
+Le code suivant précise les paramètres pour parser les colonnes.
+
+```{r import, echo=TRUE}
+library(readr)
+
+# projets
+df_bmo_proj_histo <-
+  read_csv2(
+    "data/dg_dsee_doe_bmo_proj_histo.csv",
+    col_types = cols(
+      .default = col_character(),
+      annee = col_double(),
+      nb_proj_tot = col_double(),
+      nb_proj_diff = col_double(),
+      nb_proj_sais = col_double(),
+      nb_proj_sais_diff = col_double()
+    )
+  )
+
+# entreprises
+df_bmo_entr_histo <-
+  read_csv2(
+    "data/dg_dsee_doe_bmo_entr_histo.csv",
+    col_types = cols(
+      .default = col_character(),
+      annee = col_double(),
+      nb_entr = col_double(),
+      nb_entr_recrut = col_double(),
+      nb_proj_tot = col_double(),
+      nb_proj_diff = col_double(),
+      nb_proj_sais = col_double()
+    )
+  )
+
+# individuelle
+df_bmo_indiv_histo <-
+  read_csv2(
+    "data/dg_dsee_doe_bmo_indiv_histo.csv",
+    col_types = cols(
+      .default = col_character(),
+      annee = col_double(),
+      nb_proj_tot = col_double(),
+      nb_proj_diff = col_double(),
+      nb_proj_sais = col_double(),
+      nb_metier = col_double(),
+      ponder = col_double(),
+      part_proj_diff = col_double(),
+      part_proj_sais = col_double()
+    )
+  )
+```
+
+## Base projets
+
+Cette table contient `r dim(df_bmo_proj_histo)[1]` observations (il s'agit de croisement de variables) pour `r dim(df_bmo_proj_histo)[2]` variables.
+
+L'observation n'a pas de sens seule, mais la table peut servir à reconstruire de nombreuses ventilations.
+
+Toutes les variables préfixées par `lib` sont des libellés.
+
+Les variables sont :
+
++ `annee` : en numérique, le millésime de l'enquête ;
++ `fap225`, `fap87` : nomenclature FAP en deux niveaux ;
++ `rome` : ROME, calculé à partir d'une table de passage ;
++ `naf732`, `naf88`, `naf38`, `secteur_bmo`, `gd_secteur_bmo` : différentes nomenclatures sectorielles ;
++ `taille`: la taille de l'entreprise ;
++ `reg`, `dep` : la région et le département, tels que renseignés dans l'enquête (*modulo* les fusions de régions) ;
++ `commune_last`: le code commune de la dernière année. Les codes communes des années précédents ont été recodées vers cette version ;
++ `bassin_bmo_last` : le code bassin BMO dernière version ;
++ `ze`: la zone d'emploi ;
++ `nb_proj_tot`, `nb_proj_diff`, `nb_proj_sais`, `nb_proj_sais_diff`: respectivement le nombre de projets totaux, difficiles, saisonniers et saisonniers difficiles. Ces variables sont pondérées. Il faut les sommer lorsqu'on regroupe. On peut recalculer la part de projets difficiles ou saisonniers à partir de ces variables. Les totaux peuvent être très légèrement différents des chiffres issus des tables sources (de l'ordre d'une dizaine de projets au niveau national) du fait du calage ROME.
+
+Un extrait de la table :
+
+```{r extrait_proj}
+head(df_bmo_proj_histo, 10)
+```
+
+## Base entreprise
+
+Cette table contient `r dim(df_bmo_entr_histo)[1]` observations (il s'agit de croisement de variables) pour `r dim(df_bmo_entr_histo)[2]` variables.
+
+Elle est le pendant côté entreprise de la table projets et sert par exemple à calculer le taux d'établissements recruteurs. On peut s'en servir quand on n'a pas besoin du détail des projets par métier.
+
+Toutes les variables préfixées par `lib` sont des libellés.
+
+Les variables sont :
+
++ `annee` : en numérique, le millésime de l'enquête ;
++ `naf732`, `naf88`, `naf38`, `secteur_bmo`, `gd_secteur_bmo` : différentes nomenclatures sectorielles ;
++ `taille`: la taille de l'entreprise ;
++ `reg`, `dep` : la région et le département, tels que renseignés dans l'enquête (*modulo* les fusions de régions) ;
++ `commune_last`: le code commune de la dernière année. Les codes communes des années précédents ont été recodées vers cette version ;
++ `bassin_bmo_last` : le code bassin BMO dernière version ;
++ `ze`: la zone d'emploi ;
++ `nb_proj_tot`, `nb_proj_diff`, `nb_proj_sais` : respectivement le nombre de projets totaux, difficiles, saisonniers et saisonniers difficiles. Ces variables sont pondérées. Il faut les sommer lorsqu'on regroupe. On peut recalculer la part de projets difficiles ou saisonniers à partir de ces variables ;
++ `nb_entr` et `nb_entr_recrut` : respectivement nombre d'entreprises et nombre d'entreprises qui recrutent. Ces variables servent à calculer le taux d'établissements recruteurs.
+
+Un extrait de la table :
+
+```{r extrait_entr}
+head(df_bmo_entr_histo, 10)
+```
+
+## Base individuelle
+
+Cette table contient `r dim(df_bmo_indiv_histo)[1]` observations pour `r dim(df_bmo_indiv_histo)[2]` variables.
+
+L'objectif de cette table est de réaliser des exploitations de nature plus méthodologique ou des croisements avec d'autres tables qui nécessitent le SIRET, comme la DPAE par exemple.
+
+Une observation correspond ici à une réponse d'entreprise. Chaque observation a donc un sens.
+
+Toutes les variables préfixées par `lib` sont des libellés.
+
+Les variables sont :
+
++ `annee` : en numérique, le millésime de l'enquête ;
++ `naf732`, `naf88`, `naf38`, `secteur_bmo`, `gd_secteur_bmo` : différentes nomenclatures sectorielles ;
++ `taille`: la taille de l'entreprise ;
++ `reg`, `dep` : la région et le département, tels que renseignés dans l'enquête (*modulo* les fusions de régions) ;
++ `commune_annee`: le code commune de l'année de l'enquête ;
++ `commune_last`: le code commune de la dernière année. Les codes communes des années précédents ont été recodées vers cette version ;
++ `bassin_bmo_annee`: le bassin BMO de l'année de l'enquête ;
++ `bassin_bmo_last` : le code bassin BMO dernière version ;
++ `ze`: la zone d'emploi ;
++ `source`: l'origine de la réponse (Web, papier, relance, etc.) ;
++ `ind_recrut`: indicatrice qui dit si l'entreprise recrute (`1`) ou pas (`0`) ;
++ `ponder` : le coefficient de pondération ;
++ `nb_proj_tot`, `nb_proj_diff`, `nb_proj_sais` : respectivement le nombre de projets totaux, difficiles, saisonniers et saisonniers difficiles. Ces variables ne sont pas pondérées ;
++ `part_proj_diff` et `part_proj_sais` : part de projets difficiles et de projets saisonniers dans l'entreprise. Vaut `NA` si l'entreprise n'est pas recruteuse.
+
+Un extrait de la table :
+
+```{r extrait_indiv}
+head(df_bmo_indiv_histo, 10)
+```

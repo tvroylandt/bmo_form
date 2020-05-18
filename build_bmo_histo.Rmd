@@ -1,0 +1,507 @@
+---
+title: "Construction des bases BMO historicées"
+author: "Thomas Vroylandt"
+date: "15/05/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE,
+                      warning = FALSE, 
+                      eval = FALSE)
+```
+
+## Objectifs
+
+On va construire trois tables historisées avec les informations de l'enquête principale - Besoins en main d'oeuvre (BMO), de 2011 à la dernière année disponible :
+
++ une table pour les projets ;
++ une table au niveau des entreprises ;
++ une table individuelle avec davantage d'informations.
+
+Les objectifs sont :
+
++ de permettre un accès facilité aux tables en historique ;
++ en les compilant et en les mettant à disposition sous SISP (et permettre ainsi des performances de calculs accrues) ;
++ d'inclure les libellés (dé-normalisation) afin d'éviter des jointures supplémentaires à l'usage ;
++ de construire des regroupements cohérents au niveau des bassins et des communes. Sont ainsi inclus à la fois la commune et le bassin pour l'année en question mais aussi la dernière version connue de ces variables ;
++ de permettre un meilleur passage vers le ROME, notamment utilisé pour le calcul des tensions ;
++ d'autoriser des analyses plus méthodologiques à l'aide des tables individuelles propres ;
++ d'obtenir des tables sous des formats plus propres que les tables sources.
+
+## Améliorations
+
+Quelques améliorations sont à prévoir par la suite :
+
++ utilisation du package de référentiels ;
++ création d'un identifiant historique au travers du suivi des SIRET ;
++ inclusion de la population-mère dans la table individuelle, pour le calcul des taux de réponse ;
++ amélioration des jeux de pondérations ;
++ ajouter l'enquête complémentaire.
+
+## Chaîne de traitement
+
+```{r library}
+library(tidyverse)
+library(fs)
+library(readxl)
+```
+
+Du fait du volume important de données traitées, on force la mémoire maximale.
+
+```{r memory_size}
+memory.limit(size = 2000000)
+```
+
+### Import
+
+La partie import est traitée à part dans `import_bmo_histo`.
+
+### Nombre de projets
+
+#### Calcul des projets
+
+On charge tous les fichier projets qu'on assemble. On calcule ensuite le nombre de projets difficiles et saisonnier difficiles. L'indicatrice de projet difficile vaut 1 si le projet est difficile et 2 sinon.
+
+```{r assemblage_proj}
+df_bmo_init_proj <- dir_ls("data-raw/inter/", regexp = "proj") %>%
+  map_dfr(read_rds) %>%
+  mutate(
+    ind_proj_diff = as.character(ind_proj_diff),
+    nb_proj_diff = if_else(ind_proj_diff == "1", nb_proj_tot, 0),
+    nb_proj_sais_diff = if_else(ind_proj_diff == "1", nb_proj_sais, 0)
+  ) %>%
+  select(-ind_proj_diff)
+```
+
+#### Ajout du ROME
+
+On utilise la table de passage FAP -> ROME constituée à partir des offres collectées de Pôle emploi et des offres scrapées de la Dares pour passer les données en ROME. Il est ensuite nécessaire de bien calculer les projets pour ne pas faire de duplication. On a deux FAP (R1Z66 et V5Z00) où aucun ROME ne correspond. 
+
+La table ainsi obtenue permet d'obtenir et le nombre de projets en ROME en sommant selon cette dimension et le nombre de projets en FAP si l'on somme selon cette dernière dimension.
+
+```{r ajout_rome}
+# passage FAP-ROME
+passage_fap225_rome_poids <- read_csv2("data-raw/ref/passage_fap225_rome_poids.csv")
+
+# jointure et calcul
+df_bmo_init_proj_rome <- df_bmo_init_proj %>%
+  left_join(passage_fap225_rome_poids, by = "fap225") %>%
+  replace_na(list(poids_fap_rome = 1)) %>% 
+  mutate(
+    nb_proj_tot = nb_proj_tot * poids_fap_rome,
+    nb_proj_diff = nb_proj_diff * poids_fap_rome,
+    nb_proj_sais = nb_proj_sais * poids_fap_rome,
+    nb_proj_sais_diff = nb_proj_sais_diff * poids_fap_rome
+  )
+```
+
+#### Nomenclatures métiers
+
+On ajoute les niveaux des nomenclatures métiers ainsi que les libellés.
+
+```{r proj_metiers}
+# refs
+ref_fap225 <- read_xlsx("data-raw/ref/ref_fap225.xlsx")
+
+ref_fap87 <- read_xlsx("data-raw/ref/ref_fap87.xlsx")
+
+ref_rome <- read_xlsx("data-raw/ref/ref_rome.xlsx")
+
+# jointure
+df_bmo_ok_proj <- df_bmo_init_proj_rome %>%
+  mutate(
+    fap87 = str_sub(fap225, 1, 3)
+  ) %>%
+  left_join(ref_fap225, by = "fap225") %>%
+  left_join(ref_fap87, by = "fap87") %>%
+  left_join(ref_rome, by = "rome")
+```
+
+### Informations
+
+On charge et on assemble les fichiers d'informations.
+
+```{r assemble_infos}
+df_bmo_init_infos <- dir_ls("data-raw/inter/", regexp = "infos") %>% 
+  map_dfr(read_rds)
+```
+
+#### Gestion des géographies bassins et communes
+
+On gère d'abord la géographie communale. Et on ajoute le niveau zone d'emploi.
+On gère par la même occasion le passage des anciennes aux nouvelles régions. Tout est mis en géographie nouvelles régions.
+
+Certaines communes fusionnées introduisent des incohérences dans les appartenances départements/régions, mais on conserve l'appartenance d'origine.
+
+```{r geo_commune}
+# tables de passage Insee légèrement modifiée (PLM / Monaco / Saint-Martin / Saint-Barthélémy)
+passage_commune_init_last <- read_xlsx("data-raw/ref/passage_commune_init_last.xlsx") %>% 
+  select(-lib_commune_last)
+
+passage_commune_ze <- read_xlsx("data-raw/ref/passage_commune_ze.xlsx")
+
+passage_commune_bassin_bmo_last <- read_xlsx("data-raw/ref/passage_commune_bassin_bmo_last.xlsx")
+
+# jointure
+df_bmo_init_infos_geo <- df_bmo_init_infos %>%
+  left_join(passage_commune_init_last, by = c("cdcmet" = "commune_init")) %>%
+  left_join(passage_commune_ze, by = c("commune_last" = "commune")) %>%
+  left_join(passage_commune_bassin_bmo_last,
+            by = c("commune_last" = "commune")) %>%
+  mutate(
+    reg = fct_collapse(
+      reg,
+      "01" = "01",
+      "02" = "02",
+      "03" = "03",
+      "04" = "04",
+      "11" = "11",
+      "24" = "24",
+      "27" = c("26", "43", "27"),
+      "28" = c("23", "25", "28"),
+      "32" = c("31", "22", "32"),
+      "44" = c("21", "41", "42", "44"),
+      "52" = "52",
+      "53" = "53",
+      "75" = c("54", "72", "74", "75"),
+      "76" = c("73", "91", "76"),
+      "84" = c("82", "83", "84"),
+      "93" = "93",
+      "94" = "94"
+    )
+  ) %>%
+  rename(commune_annee = cdcmet)
+```
+
+#### Identifiant historique
+
+A gerer ensuite en retraçant les changements de SIRET.
+
+#### Ajout des libellés
+
+```{r ajout_lib}
+# passage
+passage_naf732_naf38 <-
+  read_xlsx("data-raw/ref/passage_naf732_naf38.xlsx")
+
+passage_naf88_secteur_bmo <-
+  read_xlsx("data-raw/ref/passage_naf88_secteur_bmo.xlsx")
+
+# refs
+ref_naf732 <- read_xlsx("data-raw/ref/ref_naf732.xlsx")
+
+ref_naf88 <- read_xlsx("data-raw/ref/ref_naf88.xlsx")
+
+ref_reg <- read_xlsx("data-raw/ref/ref_reg.xlsx")
+
+ref_dep <- read_xlsx("data-raw/ref/ref_dep.xlsx")
+
+# jointure
+df_bmo_init_infos_lib <- df_bmo_init_infos_geo %>%
+  mutate(naf88 = str_sub(naf732, 1, 2)) %>%
+  left_join(ref_naf732, by = "naf732") %>%
+  left_join(ref_naf88, by = "naf88") %>%
+  left_join(passage_naf732_naf38, by = "naf732") %>%
+  left_join(passage_naf88_secteur_bmo, by = "naf88") %>%
+  left_join(ref_reg, by = "reg") %>% 
+  left_join(ref_dep, by = "dep") %>% 
+  mutate(
+    taille = fct_recode(
+      taille,
+      "0 salarié" = "0",
+      "1 à 4 sal" = "1",
+      "5 à 9 sal" = "2",
+      "10 à 19 sal" = "3",
+      "20 à 49 sal" = "4",
+      "50 à 99 sal" = "5",
+      "100 à 199 sal" = "6",
+      "Plus de 200 sal" = "7"
+    )
+  )
+```
+
+#### Indicatrice de recrutement
+
+On ajoute le volume de projets de recrutements totaux, difficiles et saisonniers par SIRET. On construit ensuite une indicatrice pour si l'entreprise est recruteuse (1) ou non (0). Les totaux sont à ce stade non pondérés.
+
+```{r ind_recrut}
+# calcul par SIRET
+df_bmo_entr_recrut <- df_bmo_ok_proj %>%
+  group_by(siret, annee) %>%
+  summarise(
+    nb_proj_tot = sum(nb_proj_tot),
+    nb_proj_diff = sum(nb_proj_diff),
+    nb_proj_sais = sum(nb_proj_sais),
+    nb_metier = n()
+  ) %>%
+  mutate(part_proj_diff = nb_proj_diff / nb_proj_tot,
+         part_proj_sais = nb_proj_sais / nb_proj_tot) %>%
+  ungroup()
+
+# jointure et indicatrice
+df_bmo_ok_infos <- df_bmo_init_infos_lib %>%
+  left_join(df_bmo_entr_recrut, by = c("siret", "annee")) %>%
+  replace_na(list(
+    nb_proj_tot = 0,
+    nb_proj_diff = 0,
+    nb_proj_sais = 0,
+    nb_metier = 0
+  )) %>%
+  mutate(ind_recrut = if_else(nb_proj_tot > 0, "1", "0"))
+```
+
+### Constitution des bases agrégées
+
+#### Base projets
+
+Il faut recroiser les informations individuelles par SIRET avec les projets, ajouter la pondération et regrouper selon les variables d'intérêt.
+
+On sort les libellés pour les rejointer ensuite pour des questions de performance.
+
+```{r regroup_base_proj}
+# informations
+df_bmo_ok_infos_recrut <- df_bmo_ok_infos %>%
+  filter(ind_recrut == "1") %>%
+  select(
+    -ind_recrut,-nb_proj_tot,-nb_proj_diff,-nb_proj_sais,-part_proj_diff,-part_proj_sais
+  )
+
+# jointure, pondération 
+df_bmo_inter_proj <- df_bmo_ok_proj %>%
+  left_join(df_bmo_ok_infos_recrut, by = c("siret", "annee")) %>%
+  mutate(
+    nb_proj_tot = nb_proj_tot * ponder,
+    nb_proj_diff = nb_proj_diff * ponder,
+    nb_proj_sais = nb_proj_sais * ponder,
+    nb_proj_sais_diff = nb_proj_sais_diff * ponder
+  )
+
+# regroupement
+df_bmo_full_proj <- df_bmo_inter_proj %>%
+  group_by(annee,
+           fap225,
+           rome,
+           naf732,
+           taille,
+           reg,
+           dep,
+           commune_last) %>%
+  summarise(
+    nb_proj_tot = sum(nb_proj_tot),
+    nb_proj_diff = sum(nb_proj_diff),
+    nb_proj_sais = sum(nb_proj_sais),
+    nb_proj_sais_diff = sum(nb_proj_sais_diff)
+  ) %>%
+  ungroup() %>%
+  left_join(
+    (
+      df_bmo_inter_proj %>%
+        distinct(
+          fap225,
+          lib_fap225,
+          fap87,
+          lib_fap87,
+          rome,
+          lib_rome,
+          naf732,
+          lib_naf732,
+          naf88,
+          lib_naf88,
+          naf38,
+          lib_naf38,
+          secteur_bmo,
+          lib_secteur_bmo,
+          gd_secteur_bmo,
+          taille,
+          reg,
+          lib_reg,
+          dep,
+          lib_dep,
+          bassin_bmo_last,
+          lib_bassin_bmo_last,
+          ze,
+          lib_ze,
+          commune_last
+        )
+    ),
+    by = c(
+      "fap225",
+      "rome",
+      "naf732",
+      "taille",
+      "reg",
+      "dep",
+      "commune_last"
+    )
+  ) %>%
+  select(
+    annee,
+    fap225,
+    lib_fap225,
+    fap87,
+    lib_fap87,
+    rome,
+    lib_rome,
+    naf732,
+    lib_naf732,
+    naf88,
+    lib_naf88,
+    naf38,
+    lib_naf38,
+    secteur_bmo,
+    lib_secteur_bmo,
+    gd_secteur_bmo,
+    taille,
+    reg,
+    lib_reg,
+    dep,
+    lib_dep,
+    bassin_bmo_last,
+    lib_bassin_bmo_last,
+    ze,
+    lib_ze,
+    commune_last,
+    nb_proj_tot,
+    nb_proj_diff,
+    nb_proj_sais,
+    nb_proj_sais_diff
+  )
+```
+
+#### Base entreprise
+
+On regroupe les informations selon les variables d'intérêt. L'indicatrice de recrutement est passée en nombre d'entreprises qui recrutent. On ajoute une variable du nombre d'entreprise par croisement. L'ensemble est pondéré.
+
+```{r regroup_base_entr}
+df_bmo_full_infos <- df_bmo_ok_infos %>%
+  mutate(
+    ind_recrut_ponder = if_else(ind_recrut == "1", ponder, 0),
+    nb_proj_tot = nb_proj_tot * ponder,
+    nb_proj_diff = nb_proj_diff * ponder,
+    nb_proj_sais = nb_proj_sais * ponder
+  ) %>%
+  group_by(annee,
+           naf732,
+           taille,
+           reg,
+           dep,
+           commune_last) %>%
+  summarise(
+    nb_entr = sum(ponder),
+    nb_entr_recrut = sum(ind_recrut_ponder),
+    nb_proj_tot = sum(nb_proj_tot),
+    nb_proj_diff = sum(nb_proj_diff),
+    nb_proj_sais = sum(nb_proj_sais)
+  ) %>%
+  ungroup() %>%
+  left_join(
+    (
+      df_bmo_ok_infos %>%
+        distinct(
+          naf732,
+          lib_naf732,
+          naf88,
+          lib_naf88,
+          naf38,
+          lib_naf38,
+          secteur_bmo,
+          lib_secteur_bmo,
+          gd_secteur_bmo,
+          taille,
+          reg,
+          lib_reg,
+          dep,
+          lib_dep,
+          bassin_bmo_last,
+          lib_bassin_bmo_last,
+          ze,
+          lib_ze,
+          commune_last
+        )
+    ),
+    by = c("naf732", "taille", "reg", "dep", "commune_last")
+  ) %>%
+  select(
+    annee,
+    naf732,
+    lib_naf732,
+    naf88,
+    lib_naf88,
+    naf38,
+    lib_naf38,
+    secteur_bmo,
+    lib_secteur_bmo,
+    gd_secteur_bmo,
+    taille,
+    reg,
+    lib_reg,
+    dep,
+    lib_dep,
+    bassin_bmo_last,
+    lib_bassin_bmo_last,
+    ze,
+    lib_ze,
+    commune_last,
+    nb_entr,
+    nb_entr_recrut,
+    nb_proj_tot,
+    nb_proj_diff,
+    nb_proj_sais
+  )
+```
+
+## Base individuelle
+
+On réordonne les variables.
+
+```{r ordre_indiv}
+df_bmo_full_indiv <- df_bmo_ok_infos %>% 
+  select(
+    siret,
+    annee,
+    naf732,
+    lib_naf732,
+    naf88,
+    lib_naf88,
+    naf38,
+    lib_naf38,
+    secteur_bmo,
+    lib_secteur_bmo,
+    gd_secteur_bmo,
+    taille,
+    reg,
+    lib_reg,
+    dep,
+    lib_dep,
+    bassin_bmo_annee,
+    bassin_bmo_last,
+    lib_bassin_bmo_last,
+    ze,
+    lib_ze,
+    commune_annee,
+    commune_last,
+    source,
+    ind_recrut,
+    ponder,
+    nb_proj_tot,
+    nb_proj_diff,
+    nb_proj_sais,
+    nb_metier,
+    part_proj_diff,
+    part_proj_sais
+  )
+```
+
+### Export
+
+On exporte les trois bases dans `data/` en csv.
+
+```{r export}
+write_excel_csv2(df_bmo_full_proj, "data/dg_dsee_doe_bmo_proj_histo.csv")
+write_excel_csv2(df_bmo_full_infos, "data/dg_dsee_doe_bmo_entr_histo.csv")
+write_excel_csv2(df_bmo_full_indiv, "data/dg_dsee_doe_bmo_indiv_histo.csv")
+```
+
+Il faudra ensuite les charger dans SISP, dans le dossier `NTZ_SECU`, à partir des fichiers csv.

@@ -1,0 +1,216 @@
+---
+title: "Import des bases BMO sources"
+author: "Thomas Vroylandt"
+date: "15/05/2020"
+output: html_document
+params:
+    complet: FALSE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE,
+                      warning = FALSE)
+```
+
+
+### Packages et mémoire
+
+```{r library}
+library(tidyverse)
+library(haven)
+library(glue)
+```
+
+Du fait du volume important de données traitées, on force la mémoire maximale.
+
+```{r memory_size}
+memory.limit(size = 2000000)
+```
+
+### Import et sélection des variables
+
+On importe ici les bases sources pour chaque année. On ne conserve que les variables d'intérêt qu'on renomme si besoin. Une variable `annee` est ajoutée.
+
+On construit alors deux tables pour chaque année :
+
++ l'une qui contient le SIRET et les variables de projets. Cette table est pivotée pour enlever les lignes vides ;
++ l'autre qui contient les informations sur l'entreprise.
+
+Le SIRET est la clé identifiante. Chaque table est ensuite sauvegardée. On pourra ainsi ré-importer à part.
+
+> Ce bloc n'a pas à être exécuté à chaque fois. On peut ne faire tourner que la dernière année.
+
+```{r}
+source("R/read_split_bmo.R")
+```
+
++ 2011
+
+```{r import_2011, eval=params$complet}
+read_split_bmo(
+  chemin_data = "data-raw/init/bastot11.sas7bdat",
+  siret = siret,
+  reg = reg,
+  dept = dept,
+  cdcmet = cdcmet,
+  be = be11,
+  taille = taille,
+  naf = naf732,
+  ponder = ponder11,
+  annee = 2011
+)
+```
+
++ 2012
+
+```{r import_2012, eval=params$complet}
+read_split_bmo(
+  chemin_data = "data-raw/init/bastot12.sas7bdat",
+  siret = siret,
+  reg = reg,
+  dept = dept,
+  cdcmet = cdcmet,
+  be = be12,
+  taille = taille,
+  naf = NAF732,
+  ponder = ponder12,
+  annee = 2012
+)
+```
+
++ 2013
+
+```{r import_2013, eval=params$complet}
+read_split_bmo(
+  chemin_data = "data-raw/init/bastot13.sas7bdat",
+  siret = siret,
+  reg = reg,
+  dept = dept,
+  cdcmet = cdcmet,
+  be = be13,
+  taille = taille,
+  naf = NAF732,
+  ponder = ponder13,
+  annee = 2013
+)
+```
+
++ 2014
+
+```{r import_2014, eval=params$complet}
+read_split_bmo(
+  chemin_data = "data-raw/init/bastot14.sas7bdat",
+  siret = SIRET,
+  reg = REG,
+  dept = DEPT,
+  cdcmet = CDCMET,
+  be = BE14,
+  taille = taille,
+  naf = naf732,
+  ponder = ponder14,
+  annee = 2014
+)
+```
+
++ 2015
+
+```{r import_2015, eval=params$complet}
+read_split_bmo(
+  chemin_data = "data-raw/init/bastot15.sas7bdat",
+  siret = siret,
+  reg = reg,
+  dept = dept,
+  cdcmet = cdcmet,
+  be = be15,
+  taille = taille,
+  naf = naf732,
+  ponder = ponder15,
+  annee = 2015
+)
+```
+
++ 2016
+
+```{r import_2016, eval=params$complet}
+read_split_bmo(
+  chemin_data = "data-raw/init/bastot16.sas7bdat",
+  siret = SIRET,
+  reg = REG,
+  dept = DEPT,
+  cdcmet = CDCMET,
+  be = BE16,
+  taille = taille,
+  naf = NAF732,
+  ponder = ponder16,
+  annee = 2016
+)
+```
+
++ 2017
+
+```{r import_2017, eval=params$complet}
+read_split_bmo(
+  chemin_data = "data-raw/init/bastot17.sas7bdat",
+  siret = SIRET,
+  reg = REG,
+  dept = DEPT,
+  cdcmet = CDCMET,
+  be = BE17,
+  taille = taille,
+  naf = NAF732,
+  ponder = ponder17,
+  annee = 2017
+)
+```
+
++ 2018
+
+```{r import_2018, eval=params$complet}
+read_split_bmo(
+  chemin_data = "data-raw/init/bastot18.sas7bdat",
+  siret = siret,
+  reg = REG_2018,
+  dept = DEPT,
+  cdcmet = CDCMET,
+  be = BE18,
+  taille = taille,
+  naf = NAF732,
+  ponder = ponder18,
+  annee = 2018
+)
+```
+
++ 2019
+
+```{r import_2019, eval=params$complet}
+read_split_bmo(
+  chemin_data = "data-raw/init/bastot19.sas7bdat",
+  siret = SIRET,
+  reg = REG_2019,
+  dept = DEPT,
+  cdcmet = CDCMET,
+  be = BE19,
+  taille = taille,
+  naf = NAF732,
+  ponder = ponder19,
+  annee = 2019
+)
+```
+
++ 2020
+
+```{r import_2020, eval=params$complet}
+read_split_bmo(
+  chemin_data = "data-raw/init/bastot20.sas7bdat",
+  siret = SIRET,
+  reg = REG_2020,
+  dept = DEPT,
+  cdcmet = CDCMET,
+  be = BE20,
+  taille = taille,
+  naf = NAF732,
+  ponder = ponder20,
+  annee = 2020
+)
+```
